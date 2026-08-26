@@ -14,30 +14,28 @@ hop list.
 
 1. If there's no `flow-slice` trace for this topic already in context, run the
    `flow-slice` skill first.
-2. Convert the trace to TOON using the schema below. Write it to whatever path the
-   user specified; if none was given, default to a git-ignored scratch directory —
-   `.scratch/<topic-slug>.toon` (create `.scratch/` if it doesn't exist). Keep the
-   confirmed/unresolved distinction `flow-slice` produced — never invent a `via` or
-   `evidence` value that trace didn't confirm. Run
-   `scripts/validate-toon.sh <path-to-toon>` and fix every reported error before
-   opening the viewer.
-3. Open the hosted viewer with the complete TOON payload embedded in the URL hash:
+2. Convert the trace to TOON using the schema below. Write it to the path the user
+   specified; otherwise use the environment's writable temporary directory, normally
+   `/tmp/flow-slice-viz/<topic-slug>.toon`. Keep the confirmed/unresolved distinction
+   `flow-slice` produced — never invent a `via` or `evidence` value that trace didn't
+   confirm.
+3. Validate and open the hosted viewer with the complete TOON payload embedded in the
+   URL hash:
    ```
    scripts/open-viewer.sh <path-to-toon>
    ```
 
-   The launcher validates the file again, prints the complete URL, and opens it in the
-   system browser. When using browser control, run it with `--print`, then pass the
-   printed literal URL, including everything after `#b64=`, as the navigation argument;
-   a shell variable does not cross into a separate browser tool call.
+   The launcher is the validation gate: fix any reported error and rerun it. A separate
+   `validate-toon.sh` call is optional. The launcher passes the URL directly to the
+   system browser instead of printing the long payload in the terminal.
    The URL is self-contained; the viewer does not fetch the `.toon` file, and the
    fragment is never sent to the hosting server. The `base64` / `tr` pipeline is
    POSIX-portable (macOS and Linux).
 
-   Before completing, inspect the browser and confirm both that its URL still contains
-   `#b64=` and that the viewer shows the trace topic and graph instead of the empty file
-   picker. If browser control is unavailable, give the complete `_URL` to the user and
-   state that rendered-state verification remains outstanding.
+   Before completing, inspect the opened browser when browser control is available and
+   confirm both that its URL still contains `#b64=` and that the viewer shows the trace
+   topic and graph instead of the empty file picker. Otherwise state that rendered-state
+   verification remains outstanding; the user already has the opened page.
 
 ## Schema
 
