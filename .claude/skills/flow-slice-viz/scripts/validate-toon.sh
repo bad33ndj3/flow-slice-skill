@@ -36,6 +36,9 @@ def split_row(row, source, line_number):
 
 
 def validate(text, source):
+    if not text.strip():
+        raise ValueError(f"{source}: file is empty")
+
     lines = text.replace("\r\n", "\n").split("\n")
     parsed, topic, index = {}, None, 0
     while index < len(lines):
@@ -83,6 +86,8 @@ def validate(text, source):
         raise ValueError(f"{source}: missing {', '.join(missing)}")
 
     services = [row["id"] for row in parsed["services"]]
+    if not services:
+        raise ValueError(f"{source}: services table must not be empty")
     if len(services) != len(set(services)):
         raise ValueError(f"{source}: service ids must be unique")
     service_ids = set(services)
@@ -100,8 +105,10 @@ def validate(text, source):
     for row in parsed["edges"]:
         if row["from"] not in service_ids or row["to"] not in service_ids:
             raise ValueError(f"{source}: edge references an unknown service")
-        if row["kind"] not in {"http", "grpc", "event"}:
-            raise ValueError(f"{source}: edges.kind must be http, grpc, or event")
+        if row["kind"] not in {"http", "grpc", "event", "unknown"}:
+            raise ValueError(f"{source}: edges.kind must be http, grpc, event, or unknown")
+        if row["kind"] == "unknown" and row["confirmed"] != "false":
+            raise ValueError(f"{source}: edges.kind unknown requires confirmed false")
 
     for row in parsed["hops"]:
         if row["service"] not in service_ids:
@@ -124,12 +131,21 @@ hops[1]{service,path,from,file,line,to,confirmed,via,outcome}:
   api,CreateUser (http),handler,handler.go,12,service.Create,true,read,db-write
 """
     validate(valid, "self-test-valid")
-    try:
-        validate(valid.replace("web,false\n  api,false", "web,false\n  web,false"), "self-test-invalid")
-    except ValueError:
-        print("self-test passed")
-    else:
-        raise SystemExit("self-test failed: duplicate service was accepted")
+    invalid = {
+        "empty file": "",
+        "empty services table": valid.replace("services[2]{id,affected}:\n  web,false\n  api,false", "services[0]{id,affected}:"),
+        "duplicate service": valid.replace("web,false\n  api,false", "web,false\n  web,false"),
+        "malformed quoted row": valid.replace('"POST /users (name, email) -> User"', '"POST /users (name, email) -> User'),
+        "invalid edge kind": valid.replace("web,api,http,true", "web,api,smtp,true"),
+        "confirmed unknown edge": valid.replace("web,api,http,true", "web,api,unknown,true"),
+    }
+    for label, text in invalid.items():
+        try:
+            validate(text, f"self-test-{label}")
+        except ValueError:
+            continue
+        raise SystemExit(f"self-test failed: accepted {label}")
+    print("self-test passed")
 else:
     path = Path(source)
     if not path.is_file():

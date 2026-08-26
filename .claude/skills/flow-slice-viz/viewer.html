@@ -54,6 +54,7 @@
   #empty { position: fixed; top: 68px; inset-inline: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 13px; }
   #empty::before { content: "↳"; display: grid; place-items: center; width: 54px; height: 54px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 15px; background: var(--panel); color: var(--accent); font: 500 24px/1 ui-monospace, monospace; box-shadow: 0 18px 50px rgba(0, 5, 8, 0.28); }
   #empty strong { color: var(--text); font-size: 17px; font-weight: 600; letter-spacing: -0.02em; }
+  #empty.error::before, #empty.error strong { color: var(--danger); }
   #tooltip { position: fixed; display: none; max-width: min(420px, calc(100vw - 32px)); overflow: hidden; background: rgba(24, 33, 38, 0.96); border: 1px solid #3a4a51; border-radius: 10px; padding: 11px 13px; box-shadow: 0 18px 50px rgba(0, 5, 8, 0.4); backdrop-filter: blur(16px); font: 11px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace; pointer-events: none; z-index: 20; }
   #tooltip .row { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #tooltip .label { display: inline-block; min-width: 58px; color: var(--muted); margin-right: 8px; }
@@ -97,7 +98,14 @@
 // --- TOON subset parser: scalar "key: value" lines + tabular arrays
 // ("name[N]{f1,f2}:" header followed by N comma-separated indented rows).
 // See flow-slice-viz/SKILL.md for the schema this expects.
+const TOON_SCHEMAS = {
+  services: ['id', 'affected'],
+  edges: ['from', 'to', 'kind', 'confirmed', 'via', 'evidence', 'contract'],
+  hops: ['service', 'path', 'from', 'file', 'line', 'to', 'confirmed', 'via', 'outcome'],
+};
+
 function parseToon(text) {
+  if (!text.trim()) throw new Error('The TOON file is empty.');
   const lines = text.replace(/\r\n/g, '\n').split('\n');
   const result = {};
   let i = 0;
@@ -107,12 +115,18 @@ function parseToon(text) {
     const header = line.match(/^(\w+)\[(\d+)\]\{([^}]*)\}:\s*$/);
     if (header) {
       const key = header[1];
+      if (result[key]) throw new Error(`Duplicate table "${key}" on line ${i + 1}.`);
       const count = parseInt(header[2], 10);
       const fields = header[3].split(',').map(s => s.trim());
+      if (!TOON_SCHEMAS[key]) throw new Error(`Unknown table "${key}" on line ${i + 1}.`);
+      if (fields.join(',') !== TOON_SCHEMAS[key].join(',')) throw new Error(`Wrong columns for ${key} on line ${i + 1}.`);
       const rows = [];
       for (let r = 0; r < count; r++) {
         i++;
-        const cells = splitRow((lines[i] || '').trim());
+        if (!lines[i]?.startsWith('  ')) throw new Error(`Missing ${key} row on line ${i + 1}.`);
+        const cells = splitRow(lines[i].trim(), i + 1);
+        if (cells.length !== fields.length) throw new Error(`Expected ${fields.length} cells on line ${i + 1}, got ${cells.length}.`);
+        if (cells.some(cell => cell === '')) throw new Error(`Empty cell on line ${i + 1}.`);
         const obj = {};
         fields.forEach((f, idx) => { obj[f] = coerce(cells[idx]); });
         rows.push(obj);
@@ -122,13 +136,18 @@ function parseToon(text) {
       continue;
     }
     const scalar = line.match(/^(\w+):\s(.*)$/);
-    if (scalar) { result[scalar[1]] = scalar[2]; i++; continue; }
-    i++;
+    if (scalar) {
+      if (scalar[1] !== 'topic') throw new Error(`Unknown scalar "${scalar[1]}" on line ${i + 1}.`);
+      if (result[scalar[1]] !== undefined) throw new Error(`Duplicate "${scalar[1]}" on line ${i + 1}.`);
+      result[scalar[1]] = scalar[2]; i++; continue;
+    }
+    throw new Error(`Invalid TOON syntax on line ${i + 1}.`);
   }
+  validateSlice(result);
   return result;
 }
 
-function splitRow(row) {
+function splitRow(row, lineNumber) {
   const cells = [];
   let cur = '', inQuotes = false;
   for (const ch of row) {
@@ -136,6 +155,7 @@ function splitRow(row) {
     if (ch === ',' && !inQuotes) { cells.push(cur); cur = ''; continue; }
     cur += ch;
   }
+  if (inQuotes) throw new Error(`Unmatched quote on line ${lineNumber}.`);
   cells.push(cur);
   return cells;
 }
@@ -144,6 +164,35 @@ function coerce(v) {
   if (v === 'true') return true;
   if (v === 'false') return false;
   return v;
+}
+
+function validateSlice(data) {
+  if (!data.topic) throw new Error('Missing or empty topic.');
+  for (const table of ['services', 'edges', 'hops']) {
+    if (!Array.isArray(data[table])) throw new Error(`Missing ${table} table.`);
+  }
+  if (!data.services.length) throw new Error('The services table is empty.');
+  const services = new Set(data.services.map(service => service.id));
+  if (services.size !== data.services.length) throw new Error('Service ids must be unique.');
+  data.services.forEach(service => {
+    if (service.affected !== false) throw new Error('services.affected must be false.');
+  });
+  for (const [table, rows] of [['edges', data.edges], ['hops', data.hops]]) {
+    rows.forEach(row => {
+      if (typeof row.confirmed !== 'boolean') throw new Error(`${table}.confirmed must be true or false.`);
+      if ((row.confirmed === false) !== (row.via === 'unresolved')) throw new Error(`${table}.via must be unresolved exactly when confirmed is false.`);
+    });
+  }
+  data.edges.forEach(edge => {
+    if (!services.has(edge.from) || !services.has(edge.to)) throw new Error('An edge references an unknown service.');
+    if (!['http', 'grpc', 'event', 'unknown'].includes(edge.kind)) throw new Error('edges.kind must be http, grpc, event, or unknown.');
+    if (edge.kind === 'unknown' && edge.confirmed !== false) throw new Error('edges.kind unknown requires confirmed false.');
+  });
+  data.hops.forEach(hop => {
+    if (!services.has(hop.service)) throw new Error('A hop references an unknown service.');
+    if (!/^\d+$/.test(hop.line) || Number(hop.line) < 1) throw new Error('hops.line must be a positive integer.');
+    if (!['-', 'return', 'db-write', 'db-read'].includes(hop.outcome)) throw new Error(`Invalid hops.outcome "${hop.outcome}".`);
+  });
 }
 
 // --- App state
@@ -201,16 +250,35 @@ function outcomeInfo(outcome) {
 }
 
 function loadSlice(text) {
-  slice = parseToon(text);
-  slice.services = slice.services || [];
-  slice.edges = slice.edges || [];
-  slice.hops = slice.hops || [];
+  try {
+    slice = parseToon(text);
+  } catch (error) {
+    showError(error.message);
+    return;
+  }
   topicLabel.textContent = slice.topic || '';
   level = 1;
   currentService = null;
   shareLink.href = `https://bad33ndj3.github.io/flow-slice-skill/#b64=${encodeBase64(text)}`;
   shareLink.removeAttribute('aria-disabled');
   render();
+}
+
+function showError(message) {
+  if (cy) { cy.destroy(); cy = null; }
+  slice = null;
+  topicLabel.textContent = '';
+  whereLabel.textContent = '';
+  backBtn.disabled = true;
+  shareLink.removeAttribute('href');
+  shareLink.setAttribute('aria-disabled', 'true');
+  emptyEl.classList.add('error');
+  const title = document.createElement('strong');
+  title.textContent = 'Could not open flow slice';
+  const detail = document.createElement('span');
+  detail.textContent = message;
+  emptyEl.replaceChildren(title, detail);
+  emptyEl.style.display = 'flex';
 }
 
 function encodeBase64(text) {
@@ -230,6 +298,7 @@ document.getElementById('fileInput').addEventListener('change', (e) => {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = () => loadSlice(reader.result);
+  reader.onerror = () => showError(`Could not read "${file.name}".`);
   reader.readAsText(file);
 });
 
@@ -240,7 +309,7 @@ if (hashParam.startsWith('b64=')) {
   try {
     loadSlice(decodeBase64(hashParam.slice(4)));
   } catch (err) {
-    emptyEl.textContent = `Could not decode inline data: ${err}. Use the file picker instead.`;
+    showError(`Could not decode URL data: ${err.message}`);
   }
 } else {
   const preloadPath = new URLSearchParams(location.search).get('file');
@@ -248,7 +317,7 @@ if (hashParam.startsWith('b64=')) {
     fetch(preloadPath)
       .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
       .then(loadSlice)
-      .catch(err => { emptyEl.textContent = `Could not load "${preloadPath}": ${err}. Use the file picker instead.`; });
+      .catch(err => { showError(`Could not load "${preloadPath}": ${err.message}`); });
   }
 }
 
@@ -260,6 +329,11 @@ backBtn.addEventListener('click', () => {
 
 function render() {
   if (!slice) return;
+  if (typeof cytoscape !== 'function') {
+    showError('The graph library could not be loaded. Check your network connection and retry.');
+    return;
+  }
+  emptyEl.classList.remove('error');
   emptyEl.style.display = 'none';
   backBtn.disabled = level === 1;
   whereLabel.textContent = level === 1 ? 'level 1 - services' : `level 2 - ${currentService}`;
@@ -417,7 +491,9 @@ function renderLegend() {
 }
 
 function kindColor(kind) {
-  return kind === 'event' ? '#bd8ae6' : '#63a6d9';
+  if (kind === 'event') return '#bd8ae6';
+  if (kind === 'unknown') return '#f06a6a';
+  return '#63a6d9';
 }
 
 function cyStyle() {

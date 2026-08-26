@@ -21,18 +21,15 @@ hop list.
    `evidence` value that trace didn't confirm. Run
    `scripts/validate-toon.sh <path-to-toon>` and fix every reported error before
    opening the viewer.
-3. Open the hosted viewer with the complete TOON payload embedded in the URL:
+3. Open the hosted viewer with the complete TOON payload embedded in the URL hash:
    ```
-   _TOON=<path-to-toon>
-   _URL="https://bad33ndj3.github.io/flow-slice-skill/#b64=$(base64 < "$_TOON" | tr -d '\n')"
-   printf '%s\n' "$_URL"
+   scripts/open-viewer.sh <path-to-toon>
    ```
 
-   Capture the printed URL and pass that literal value, including everything after
-   `#b64=`, as the navigation argument to the available browser-control tool. A shell
-   variable does not cross into a separate browser tool call. Shell `open` and
-   `file://` skill-install paths are not browser handoff mechanisms: they can open the
-   HTML shell while losing the payload.
+   The launcher validates the file again, prints the complete URL, and opens it in the
+   system browser. When using browser control, run it with `--print`, then pass the
+   printed literal URL, including everything after `#b64=`, as the navigation argument;
+   a shell variable does not cross into a separate browser tool call.
    The URL is self-contained; the viewer does not fetch the `.toon` file, and the
    fragment is never sent to the hosting server. The `base64` / `tr` pipeline is
    POSIX-portable (macOS and Linux).
@@ -49,7 +46,7 @@ topic: <feature/change/topic string>
 services[N]{id,affected}:
   <service-id>,<true|false>
 edges[N]{from,to,kind,confirmed,via,evidence,contract}:
-  <service>,<service>,<http|grpc|event>,<true|false>,<verifying op or "unresolved">,<file:line or reason>,<HTTP operation, RPC signature, subject, or "-">
+  <service>,<service>,<http|grpc|event|unknown>,<true|false>,<verifying op or "unresolved">,<file:line or reason>,<HTTP operation, RPC signature, subject, or "-">
 hops[N]{service,path,from,file,line,to,confirmed,via,outcome}:
   <service>,<entry point name (trigger)>,<caller symbol>,<file>,<line>,<callee symbol>,<true|false>,<verifying op or "unresolved">,<return|db-write|db-read or "-">
 ```
@@ -59,7 +56,8 @@ hops[N]{service,path,from,file,line,to,confirmed,via,outcome}:
 - `edges` — level 1 links, cross-service only (HTTP/gRPC calls, NATS subject-constant
   matches). `contract` is the HTTP operation, RPC signature
   (`<Method>(<Request>) -> <Response>`), or event subject — carried over verbatim from
-  `flow-slice`'s seam-crossing, never re-derived here.
+  `flow-slice`'s seam-crossing, never re-derived here. Use `unknown` only for an
+  unconfirmed edge whose protocol could not be established.
 - `hops` — level 2, one row per caller→callee call *inside* one service. A hop with no
   further recorded call simply isn't a row. `path` is the entry point (from
   `flow-slice`'s per-entry-point tracer subagent) that produced this hop chain — lets
