@@ -65,6 +65,8 @@ what makes the slice reliable instead of a confident guess.
   metadata" (this repo's vendoring drifts from `go.mod` periodically — not yours to
   fix), fall back to reading the call site directly and report `via:read` instead of
   the op name; that's still a confirmed hop, just not an LSP-confirmed one.
+- **No semantic compression.** Record transaction wrappers, callbacks, async handoffs,
+  and adapter/client implementation calls as hops; don't keep only business-named calls.
 - **Dead end = `outcome`, not a name guess.** A hop is only a dead end when its
   callee genuinely doesn't lead anywhere further you can trace — not just because
   its name looks terminal. `Create*`/`Get*`-style names lie: a service-level

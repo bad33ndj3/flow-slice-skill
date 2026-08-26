@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ignore_warnings=false
+if [[ ${1:-} == "--ignore-warnings" ]]; then
+  ignore_warnings=true
+  shift
+fi
+
 if [[ $# -ne 1 ]]; then
-  echo "usage: $0 <trace.toon|--self-test>" >&2
+  echo "usage: $0 [--ignore-warnings] <trace.toon|--self-test>" >&2
   exit 2
 fi
 
-python3 - "$1" <<'PY'
+python3 - "$1" "$ignore_warnings" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -118,8 +124,35 @@ def validate(text, source):
         if row["outcome"] not in {"-", "return", "db-write", "db-read"}:
             raise ValueError(f"{source}: invalid hops.outcome {row['outcome']}")
 
+    return parsed
+
+
+def quality_warnings(parsed, source):
+    warnings = []
+    confirmed = [row for row in parsed["hops"] if row["confirmed"] == "true"]
+    if confirmed and all(row["via"] == "read" for row in confirmed):
+        warnings.append(
+            f"{source}: warning: all {len(confirmed)} confirmed hops use via=read; "
+            "confirm that call-graph tooling was unavailable"
+        )
+    for row in parsed["hops"]:
+        location = f"{row['file']}:{row['line']}"
+        file = row["file"].replace(chr(92), "/")
+        if row["outcome"].startswith("db-") and "/adapter/outbound/" not in f"/{file}":
+            warnings.append(
+                f"{source}: warning: {location}: {row['outcome']} stops before an outbound adapter; "
+                "trace through the repository interface and wired implementation"
+            )
+        if row["outcome"] == "return" and re.search(r"(?:Client|Repo|Repository)\)\.", row["to"]):
+            warnings.append(
+                f"{source}: warning: {location}: boundary-looking target {row['to']} is marked return; "
+                "confirm that its implementation makes no further call"
+            )
+    return warnings
+
 
 source = sys.argv[1]
+ignore_warnings = sys.argv[2] == "true"
 if source == "--self-test":
     valid = """topic: self-test
 services[2]{id,affected}:
@@ -128,9 +161,10 @@ services[2]{id,affected}:
 edges[1]{from,to,kind,confirmed,via,evidence,contract}:
   web,api,http,true,read,web.ts:1,"POST /users (name, email) -> User"
 hops[1]{service,path,from,file,line,to,confirmed,via,outcome}:
-  api,CreateUser (http),handler,handler.go,12,service.Create,true,read,db-write
+  api,CreateUser (http),repository.Create,internal/adapter/outbound/database/repository/user.go,12,queries.CreateUser,true,outgoingCalls,db-write
 """
-    validate(valid, "self-test-valid")
+    parsed = validate(valid, "self-test-valid")
+    assert quality_warnings(parsed, "self-test-valid") == []
     invalid = {
         "empty file": "",
         "empty services table": valid.replace("services[2]{id,affected}:\n  web,false\n  api,false", "services[0]{id,affected}:"),
@@ -145,14 +179,31 @@ hops[1]{service,path,from,file,line,to,confirmed,via,outcome}:
         except ValueError:
             continue
         raise SystemExit(f"self-test failed: accepted {label}")
+    warning = valid.replace(
+        "repository.Create,internal/adapter/outbound/database/repository/user.go,12,queries.CreateUser",
+        "service.Create,internal/application/services/user_service.go,12,UserRepo.Create",
+    )
+    assert len(quality_warnings(validate(warning, "self-test-warning"), "self-test-warning")) == 1
+    client_warning = valid.replace(
+        "repository.Create,internal/adapter/outbound/database/repository/user.go,12,queries.CreateUser,true,outgoingCalls,db-write",
+        "service.Send,internal/application/services/event_service.go,12,(*AnalyticsClient).Capture,true,outgoingCalls,return",
+    )
+    assert len(quality_warnings(validate(client_warning, "self-test-client"), "self-test-client")) == 1
+    read_warning = valid.replace("true,outgoingCalls,db-write", "true,read,db-write")
+    assert len(quality_warnings(validate(read_warning, "self-test-read"), "self-test-read")) == 1
     print("self-test passed")
 else:
     path = Path(source)
     if not path.is_file():
         raise SystemExit(f"{source}: not a file")
     try:
-        validate(path.read_text(), source)
+        parsed = validate(path.read_text(), source)
     except (OSError, UnicodeError, ValueError) as error:
         raise SystemExit(error)
+    warnings = quality_warnings(parsed, source)
+    for warning in warnings:
+        print(warning, file=sys.stderr)
+    if warnings and not ignore_warnings:
+        raise SystemExit(f"{source}: {len(warnings)} quality warning(s); fix them or rerun with --ignore-warnings")
     print(f"valid: {source}")
 PY

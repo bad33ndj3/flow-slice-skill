@@ -28,6 +28,9 @@ hop list.
    The launcher is the validation gate: fix any reported error and rerun it. A separate
    `validate-toon.sh` call is optional. The launcher passes the URL directly to the
    system browser instead of printing the long payload in the terminal.
+   Quality warnings block likely weak traces: interface-seam truncation, boundary-looking
+   calls marked as returns, or every confirmed hop falling back to `read`. Fix the trace;
+   use `--ignore-warnings` only after manually confirming a false positive.
    The URL is self-contained; the viewer does not fetch the `.toon` file, and the
    fragment is never sent to the hosting server. The `base64` / `tr` pipeline is
    POSIX-portable (macOS and Linux).
