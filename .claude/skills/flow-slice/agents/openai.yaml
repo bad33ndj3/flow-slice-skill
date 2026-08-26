@@ -1,4 +1,4 @@
 interface:
   display_name: "Flow Slice"
-  short_description: "Trace verified flows across service boundaries"
-  default_prompt: "Use $flow-slice to trace this change across service boundaries."
+  short_description: "Trace verified C2, C3, and C4 flows"
+  default_prompt: "Use $flow-slice to trace this change across configured C4 boundaries."

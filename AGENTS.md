@@ -2,9 +2,10 @@
 
 ## Project Structure & Module Organization
 
-This repository distributes two agent skills. Canonical skill sources live under `.claude/skills/`:
+This repository distributes three agent skills. Canonical skill sources live under `.claude/skills/`:
 
-- `flow-slice/` contains the cross-service tracing instructions.
+- `setup-flow-slice/` discovers and records project C4 boundaries.
+- `flow-slice/` contains the C2/C3/C4 tracing instructions.
 - `flow-slice-viz/` contains visualization instructions and the shared `viewer.html`.
 - Each skill's `agents/openai.yaml` defines its UI metadata.
 - `.agents/skills/` contains symlinks used by Codex; edit the canonical `.claude/skills/` files, not the links.
@@ -15,8 +16,8 @@ This repository distributes two agent skills. Canonical skill sources live under
 The project has no compilation step or dependency installation.
 
 - `task --list` shows available tasks.
-- `task install:codex` links both skills into `~/.agents/skills`.
-- `task install:claude` links both skills into `~/.claude/skills`.
+- `task install:codex` links all skills into `~/.agents/skills`.
+- `task install:claude` links all skills into `~/.claude/skills`.
 - `git diff --check` catches whitespace errors before review.
 
 Pushing to GitHub with Pages enabled (Source: GitHub Actions) deploys `viewer.html`

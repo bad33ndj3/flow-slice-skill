@@ -2,21 +2,21 @@ version: "3"
 
 tasks:
   install:codex:
-    desc: Install both skills for Codex
+    desc: Install all skills for Codex
     cmds:
       - task: install
         vars:
           DEST: "{{.HOME}}/.agents/skills"
 
   install:claude:
-    desc: Install both skills for Claude Code
+    desc: Install all skills for Claude Code
     cmds:
       - task: install
         vars:
           DEST: "{{.HOME}}/.claude/skills"
 
   install:agy:
-    desc: Install both skills for Antigravity (AGY)
+    desc: Install all skills for Antigravity (AGY)
     cmds:
       - task: install
         vars:
@@ -29,7 +29,7 @@ tasks:
     cmds:
       - mkdir -p "{{.DEST}}"
       - |
-        for skill in flow-slice flow-slice-viz; do
+        for skill in setup-flow-slice flow-slice flow-slice-viz; do
           source="{{.ROOT_DIR}}/.claude/skills/${skill}"
           target="{{.DEST}}/${skill}"
 

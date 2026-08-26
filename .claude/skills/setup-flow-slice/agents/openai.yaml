@@ -1,0 +1,4 @@
+interface:
+  display_name: "Setup Flow Slice"
+  short_description: "Discover and record a project's C4 trace map"
+  default_prompt: "Use $setup-flow-slice to configure C4 boundaries for this project."
