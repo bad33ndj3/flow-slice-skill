@@ -21,21 +21,26 @@ hop list.
    `evidence` value that trace didn't confirm. Run
    `scripts/validate-toon.sh <path-to-toon>` and fix every reported error before
    opening the viewer.
-3. Open the viewer with the complete TOON payload embedded in the URL. Choose the
-   right base URL:
-
-   **Local only** — uses the repository's viewer directly, with no temporary file:
+3. Open the hosted viewer with the complete TOON payload embedded in the URL:
    ```
    _TOON=<path-to-toon>
-   _URL="file://$(pwd)/.claude/skills/flow-slice-viz/viewer.html#b64=$(base64 < "$_TOON" | tr -d '\n')"
-   open "$_URL"
+   _URL="https://bad33ndj3.github.io/flow-slice-skill/#b64=$(base64 < "$_TOON" | tr -d '\n')"
+   printf '%s\n' "$_URL"
    ```
 
-   The URL is self-contained: the viewer does not fetch the `.toon` file. Use the
-   viewer's **Share** button to open the same payload in the hosted viewer. URL
-   fragments are client-only and are never sent to the hosting server. The `base64` /
-   `tr` pipeline is POSIX-portable (macOS and Linux). Fall back to the file picker if
-   no browser / `open` is available.
+   Capture the printed URL and pass that literal value, including everything after
+   `#b64=`, as the navigation argument to the available browser-control tool. A shell
+   variable does not cross into a separate browser tool call. Shell `open` and
+   `file://` skill-install paths are not browser handoff mechanisms: they can open the
+   HTML shell while losing the payload.
+   The URL is self-contained; the viewer does not fetch the `.toon` file, and the
+   fragment is never sent to the hosting server. The `base64` / `tr` pipeline is
+   POSIX-portable (macOS and Linux).
+
+   Before completing, inspect the browser and confirm both that its URL still contains
+   `#b64=` and that the viewer shows the trace topic and graph instead of the empty file
+   picker. If browser control is unavailable, give the complete `_URL` to the user and
+   state that rendered-state verification remains outstanding.
 
 ## Schema
 

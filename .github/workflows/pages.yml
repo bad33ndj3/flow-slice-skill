@@ -3,8 +3,6 @@ name: Deploy viewer to GitHub Pages
 on:
   push:
     branches: [main]
-    paths:
-      - .claude/skills/flow-slice-viz/viewer.html
   workflow_dispatch:
 
 permissions:
