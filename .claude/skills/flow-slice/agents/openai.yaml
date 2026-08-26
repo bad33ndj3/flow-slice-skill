@@ -1,0 +1,4 @@
+interface:
+  display_name: "Flow Slice"
+  short_description: "Trace verified flows across service boundaries"
+  default_prompt: "Use $flow-slice to trace this change across service boundaries."

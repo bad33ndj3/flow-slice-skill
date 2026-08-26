@@ -1,0 +1,45 @@
+version: "3"
+
+tasks:
+  install:codex:
+    desc: Install both skills for Codex
+    cmds:
+      - task: install
+        vars:
+          DEST: "{{.HOME}}/.agents/skills"
+
+  install:claude:
+    desc: Install both skills for Claude Code
+    cmds:
+      - task: install
+        vars:
+          DEST: "{{.HOME}}/.claude/skills"
+
+  install:agy:
+    desc: Install both skills for Antigravity (AGY)
+    cmds:
+      - task: install
+        vars:
+          DEST: "{{.HOME}}/.gemini/config/skills"
+
+  install:
+    internal: true
+    requires:
+      vars: [DEST]
+    cmds:
+      - mkdir -p "{{.DEST}}"
+      - |
+        for skill in flow-slice flow-slice-viz; do
+          source="{{.ROOT_DIR}}/.claude/skills/${skill}"
+          target="{{.DEST}}/${skill}"
+
+          if [ -L "${target}" ] && [ "$(readlink "${target}")" = "${source}" ]; then
+            continue
+          fi
+          if [ -e "${target}" ] || [ -L "${target}" ]; then
+            echo "Refusing to replace existing ${target}" >&2
+            exit 1
+          fi
+
+          ln -s "${source}" "${target}"
+        done

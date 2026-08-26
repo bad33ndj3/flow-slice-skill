@@ -1,0 +1,4 @@
+interface:
+  display_name: "Flow Slice Viz"
+  short_description: "Visualize a verified cross-service flow trace"
+  default_prompt: "Use $flow-slice-viz to visualize the verified flow for this topic."
