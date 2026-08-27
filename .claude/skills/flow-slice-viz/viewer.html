@@ -15,11 +15,13 @@
   html,body { margin:0; height:100%; overflow:hidden; }
   body { font-family:"Avenir Next","Segoe UI",sans-serif; background:var(--canvas); color:var(--text); }
   button,input { font:inherit; }
-  #toolbar { position:fixed; inset:0 0 auto; height:68px; display:grid; grid-template-columns:auto auto auto minmax(12rem,1fr) auto; align-items:center; gap:16px; padding:0 22px; background:rgba(19,25,29,.94); border-bottom:1px solid var(--line); z-index:10; }
+  #toolbar { position:fixed; inset:0 0 auto; height:68px; display:grid; grid-template-columns:auto auto auto auto minmax(12rem,1fr) auto; align-items:center; gap:16px; padding:0 22px; background:rgba(19,25,29,.94); border-bottom:1px solid var(--line); z-index:10; }
   h1 { margin:0; color:var(--accent); font-size:14px; letter-spacing:-.02em; }
   #crumbs { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#c4cfca; font-size:12px; font-weight:600; }
   #topic { color:var(--muted); font-weight:400; }
   button,#share,#file::file-selector-button { min-height:34px; padding:7px 11px; color:var(--text); background:var(--raised); border:1px solid #34434a; border-radius:7px; cursor:pointer; text-decoration:none; font-size:11px; font-weight:600; }
+  #zoom-controls { display:flex; gap:6px; }
+  #zoom-controls button { min-width:34px; padding:7px 9px; }
   button:disabled,#share[aria-disabled="true"] { opacity:.35; cursor:default; }
   button:focus-visible,#share:focus-visible,#file:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
   #file { width:108px; color:transparent; font-size:0; }
@@ -37,7 +39,7 @@
   .swatch { width:16px; height:3px; border-radius:2px; }
   .swatch.dashed { height:2px; background:repeating-linear-gradient(90deg,currentColor 0 4px,transparent 4px 7px)!important; }
   #status { position:fixed; left:50%; bottom:24px; display:none; transform:translateX(-50%); padding:8px 12px; background:var(--accent); color:#0c1114; border-radius:7px; font-size:11px; font-weight:700; z-index:30; }
-  @media(max-width:760px) { #toolbar { grid-template-columns:auto auto auto 1fr; gap:10px; padding:0 12px; } #file { display:none; } #topic { display:none; } }
+  @media(max-width:760px) { #toolbar { grid-template-columns:auto auto auto auto 1fr; gap:10px; padding:0 12px; } #file { display:none; } #topic { display:none; } }
 </style>
 </head>
 <body>
@@ -45,6 +47,7 @@
   <h1>flow-slice-viz</h1>
   <button id="back" disabled>&larr; Back</button>
   <a id="share" role="button" aria-disabled="true" target="_blank" rel="noopener">Share</a>
+  <span id="zoom-controls" aria-label="Graph zoom controls"><button id="zoom-out" title="Zoom out" aria-label="Zoom out">−</button><button id="zoom-in" title="Zoom in" aria-label="Zoom in">+</button><button id="zoom-fit" title="Fit graph" aria-label="Fit graph">Fit</button></span>
   <span id="crumbs"></span>
   <input type="file" id="file" aria-label="Open a v2 TOON flow slice" accept=".toon,text/plain">
 </div>
@@ -64,6 +67,7 @@ const NODE_ICONS = {'focus-system':'⬡','supporting-system':'⬡',application:'
 const PATH_COLORS = ['#d98c3d','#3dd9a0','#d93d8c','#8c3dd9','#d9d13d','#3da8d9'];
 const pathColors = new Map(), expandedSystems = new Set(), expandedContainers = new Set();
 let slice=null, model=null, cy=null, level='c2', containerId=null, componentId=null;
+const zoomIn=document.getElementById('zoom-in'),zoomOut=document.getElementById('zoom-out'),zoomFit=document.getElementById('zoom-fit');
 const byId=(rows,id)=>rows.find(row=>row.id===id);
 const esc=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const pathColor=path=>{if(!pathColors.has(path))pathColors.set(path,PATH_COLORS[pathColors.size%PATH_COLORS.length]);return pathColors.get(path);};
@@ -130,6 +134,9 @@ function showError(message){if(cy){cy.destroy();cy=null;}slice=null;share.remove
 file.addEventListener('change',event=>{const selected=event.target.files[0];if(!selected)return;const reader=new FileReader();reader.onload=()=>load(reader.result);reader.onerror=()=>showError(`Could not read ${selected.name}.`);reader.readAsText(selected);});
 const hash=location.hash.slice(1);if(hash.startsWith('b64=')){try{load(decode(hash.slice(4)));}catch(error){showError(`Could not decode URL data: ${error.message}`);}}
 back.addEventListener('click',()=>{if(level==='c4'){level='c3';componentId=null;}else if(level==='c3'){level='c2';containerId=null;}render();});
+zoomIn.addEventListener('click',()=>{if(cy)cy.zoom({level:Math.min(cy.maxZoom(),cy.zoom()*1.25),renderedPosition:{x:innerWidth/2,y:innerHeight/2}});});
+zoomOut.addEventListener('click',()=>{if(cy)cy.zoom({level:Math.max(cy.minZoom(),cy.zoom()/1.25),renderedPosition:{x:innerWidth/2,y:innerHeight/2}});});
+zoomFit.addEventListener('click',()=>{if(cy)cy.fit(undefined,48);});
 
 function node(row,extra={}){return {data:{id:row.id,label:`${NODE_ICONS[extra.kind]||''} ${row.name}`.trim(),name:row.name,...extra}};}
 function aggregate(items,project,kind,labelValue,prefix,boundary=false){
@@ -194,7 +201,7 @@ function styles(){return [
   {selector:'node[kind="supporting-system"]',style:{'shape':'rectangle','background-color':'#2a2230','border-color':'#9d72b5'}},
   {selector:'node[kind="component"]',style:{'background-color':'#1c2d35','border-color':'#6799ad'}},
   {selector:'node[outside]',style:{'border-style':'dashed','color':'#e8eeeb'}},
-  {selector:'edge',style:{'width':2,'line-color':'#526068','target-arrow-color':'#526068','target-arrow-shape':'triangle','curve-style':'taxi','taxi-direction':'auto','taxi-turn':16,'label':'data(label)','font-size':11,'font-weight':600,'min-zoomed-font-size':10,'color':'#e8eeeb','text-background-color':'#0c1114','text-background-opacity':1,'text-background-padding':5,'text-border-color':'#29343a','text-border-width':1,'text-border-opacity':1}},
+  {selector:'edge',style:{'width':2,'line-color':'#526068','target-arrow-color':'#526068','target-arrow-shape':'triangle','curve-style':'taxi','taxi-direction':'auto','taxi-turn':16,'label':'data(label)','font-size':11,'font-weight':600,'min-zoomed-font-size':14,'color':'#e8eeeb','text-background-color':'#0c1114','text-background-opacity':1,'text-background-padding':5,'text-border-color':'#29343a','text-border-width':1,'text-border-opacity':1}},
   {selector:'edge[taxiTurn][labelOffset]',style:{'taxi-turn':'data(taxiTurn)','text-margin-y':'data(labelOffset)'}},
   ...Object.entries(COLORS).map(([kind,color])=>({selector:`edge[kind="${kind}"]`,style:{'line-color':color,'target-arrow-color':color,'line-style':kind==='event'?'dashed':'solid'}})),
   {selector:'edge[kind="hop"]',style:{'line-color':'data(pathColor)','target-arrow-color':'data(pathColor)'}},
