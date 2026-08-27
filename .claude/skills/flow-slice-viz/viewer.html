@@ -135,7 +135,9 @@ function node(row,extra={}){return {data:{id:row.id,label:`${NODE_ICONS[extra.ki
 function aggregate(items,project,kind,labelValue,prefix,boundary=false){
   const grouped=new Map();
   items.forEach(item=>{const source=project(item.from??item.from_component),target=project(item.to??item.to_component);if(!source||!target||source===target)return;const edgeKind=kind(item),key=`${source}|${target}|${edgeKind}`;if(!grouped.has(key))grouped.set(key,{source,target,kind:edgeKind,confirmed:true,labels:new Set(),contracts:new Set(),paths:new Set(),evidence:new Set(),via:new Set(),relationships:new Set(),outcomes:new Set(),count:0});const edge=grouped.get(key);edge.confirmed&&=item.confirmed;edge.count++;const label=labelValue(item);if(label&&label!=='-')edge.labels.add(label);if(item.contract&&item.contract!=='-')edge.contracts.add(item.contract);if(item.path)edge.paths.add(item.path);edge.evidence.add(item.evidence||`${item.file}:${item.line}`);edge.via.add(item.via);const relationship=item.from!==undefined?item.id:item.relationship;if(relationship&&relationship!=='-')edge.relationships.add(relationship);if(item.outcome&&item.outcome!=='-')edge.outcomes.add(item.outcome);});
-  return [...grouped.entries()].map(([key,edge])=>{const labels=[...edge.labels],first=labels[0]||edge.kind;return {data:{id:`${prefix}:${key}`,source:edge.source,target:edge.target,kind:edge.kind,label:`${first}${edge.count>1?` +${edge.count-1}`:''}`,boundary,confirmed:edge.confirmed,count:edge.count,contract:[...edge.contracts].join('; ')||'-',path:[...edge.paths].join('; ')||'-',evidence:[...edge.evidence].join('; '),via:[...edge.via].join('; '),relationship:[...edge.relationships].join('; ')||'-',outcome:[...edge.outcomes].join('; ')||'-'}};});
+  const edges=[...grouped.entries()].map(([key,edge])=>{const labels=[...edge.labels],first=labels[0]||edge.kind;return {data:{id:`${prefix}:${key}`,source:edge.source,target:edge.target,kind:edge.kind,label:`${first}${edge.count>1?` +${edge.count-1}`:''}`,boundary,confirmed:edge.confirmed,count:edge.count,contract:[...edge.contracts].join('; ')||'-',path:[...edge.paths].join('; ')||'-',evidence:[...edge.evidence].join('; '),via:[...edge.via].join('; '),relationship:[...edge.relationships].join('; ')||'-',outcome:[...edge.outcomes].join('; ')||'-'}};});
+  if(boundary){const bySource=new Map();edges.forEach(edge=>{if(!bySource.has(edge.data.source))bySource.set(edge.data.source,[]);bySource.get(edge.data.source).push(edge);});bySource.forEach(group=>group.forEach((edge,index)=>{edge.data.taxiTurn=16+index*8;edge.data.labelOffset=(index-(group.length-1)/2)*22;}));}
+  return edges;
 }
 function c2Elements(){
   const nodes=[node(model.focus,{nodeType:'software system',kind:'focus-system',role:'focus'})];
@@ -166,7 +168,7 @@ function c4Elements(){
   const edges=hops.map(hop=>({data:{...hop,source:symbolId(hop.from_component,hop.caller),target:symbolId(hop.to_component,hop.callee),label:hop.outcome==='-'?'':hop.outcome,evidence:`${hop.file}:${hop.line}`,kind:'hop',pathColor:pathColor(hop.path),count:1}}));
   return [...symbols.values(),...edges];
 }
-function layoutOptions(){return {name:'elk',fit:true,padding:48,nodeDimensionsIncludeLabels:true,elk:{algorithm:'layered','elk.direction':'RIGHT','elk.hierarchyHandling':'INCLUDE_CHILDREN','elk.edgeRouting':'ORTHOGONAL','elk.spacing.nodeNode':'80','elk.layered.spacing.nodeNodeBetweenLayers':'220'}};}
+function layoutOptions(){const spacing={'elk.spacing.nodeNode':'80','elk.layered.spacing.nodeNodeBetweenLayers':'220'};return {name:'elk',fit:true,padding:48,nodeDimensionsIncludeLabels:true,nodeLayoutOptions:node=>node.isParent()?{...spacing,'elk.padding':'[top=48,left=48,bottom=48,right=48]'}:{},elk:{algorithm:'layered','elk.direction':'RIGHT','elk.hierarchyHandling':'INCLUDE_CHILDREN',...spacing}};}
 function render(){
   if(!slice||typeof cytoscape!=='function'||typeof ELK!=='function'){if(slice)showError('The graph libraries could not be loaded.');return;}
   empty.classList.remove('error');empty.style.display='none';tooltip.style.display='none';back.disabled=level==='c2';
@@ -192,8 +194,8 @@ function styles(){return [
   {selector:'node[kind="supporting-system"]',style:{'shape':'rectangle','background-color':'#2a2230','border-color':'#9d72b5'}},
   {selector:'node[kind="component"]',style:{'background-color':'#1c2d35','border-color':'#6799ad'}},
   {selector:'node[outside]',style:{'border-style':'dashed','color':'#e8eeeb'}},
-  {selector:'edge',style:{'width':2,'line-color':'#526068','target-arrow-color':'#526068','target-arrow-shape':'triangle','curve-style':'segments','label':'data(label)','font-size':11,'font-weight':600,'min-zoomed-font-size':10,'color':'#e8eeeb','text-background-color':'#0c1114','text-background-opacity':1,'text-background-padding':5,'text-border-color':'#29343a','text-border-width':1,'text-border-opacity':1}},
-  {selector:'edge[boundary]',style:{'curve-style':'bezier'}},
+  {selector:'edge',style:{'width':2,'line-color':'#526068','target-arrow-color':'#526068','target-arrow-shape':'triangle','curve-style':'taxi','taxi-direction':'auto','taxi-turn':16,'label':'data(label)','font-size':11,'font-weight':600,'min-zoomed-font-size':10,'color':'#e8eeeb','text-background-color':'#0c1114','text-background-opacity':1,'text-background-padding':5,'text-border-color':'#29343a','text-border-width':1,'text-border-opacity':1}},
+  {selector:'edge[taxiTurn][labelOffset]',style:{'taxi-turn':'data(taxiTurn)','text-margin-y':'data(labelOffset)'}},
   ...Object.entries(COLORS).map(([kind,color])=>({selector:`edge[kind="${kind}"]`,style:{'line-color':color,'target-arrow-color':color,'line-style':kind==='event'?'dashed':'solid'}})),
   {selector:'edge[kind="hop"]',style:{'line-color':'data(pathColor)','target-arrow-color':'data(pathColor)'}},
   {selector:'edge[kind="c3-edge"]',style:{'line-color':'#6799ad','target-arrow-color':'#6799ad'}},
