@@ -41,11 +41,11 @@ crossing references one explicit relationship.
   retain the HTTP operation, RPC signature, or subject on the boundary relationship.
 - **Event seam.** Link publish to subscribe through the subject constant and wiring.
   Call hierarchy alone cannot establish this edge.
-- **Call graph.** Prefer available semantic operations such as `outgoingCalls`,
-  `incomingCalls`, `findReferences`, and `goToImplementation`. If an LSP is unavailable,
-  use `ast-grep` with structural patterns to reliably trace calls, interface
-  implementations, and variable usage (`via:ast`). Only as a last resort, read the call
-  site and use `via:read`; never label a guessed edge as confirmed.
+- **Call graph.** Primarily use `ast-grep` (see the `ast-grep` skill) with structural
+  patterns to reliably trace calls, interface implementations, and variable usage (`via:ast`).
+  If `ast-grep` is unavailable, fall back to semantic operations such as `outgoingCalls`
+  or `findReferences`. Only as a last resort, read the call site and use `via:read`;
+  never label a guessed edge as confirmed.
 - **No semantic compression.** Keep transaction wrappers, callback registration and
   invocation, goroutine handoffs, adapters, and clients as separate hops.
 - **Genuine outcomes.** Use `return` only for a plain leaf return. Use `db-read` or

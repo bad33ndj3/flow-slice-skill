@@ -13,9 +13,9 @@ configuration block in the project's existing agent instructions.
 1. Inspect the repository without changing it. Find the focus software system; known
    internal and external software systems; application and data-store containers;
    components; transports and contracts; composition/wiring roots; generated-code
-   paths; available LSP or semantic tools (including `ast-grep`); and the current
-   ignore rules. Prefer using `ast-grep` or LSP over manual search to find entrypoints
-   and wiring roots. Prefer manifests, schemas, and generated headers over guesses.
+   paths; available semantic tools (especially `ast-grep` / `sg`); and the current
+   ignore rules. Primarily use `ast-grep` (falling back to LSP) to find entrypoints
+   and wiring roots over manual search. Prefer manifests, schemas, and generated headers over guesses.
 2. Assign lowercase kebab-case C4 IDs that remain stable when display names change.
    Mark every finding `confirmed`, `candidate`, or `unavailable`, and show the proposed
    configuration before writing. Report unavailable tooling with a concrete

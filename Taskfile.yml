@@ -29,7 +29,7 @@ tasks:
     cmds:
       - mkdir -p "{{.DEST}}"
       - |
-        for skill in setup-flow-slice flow-slice flow-slice-viz; do
+        for skill in setup-flow-slice flow-slice flow-slice-viz ast-grep; do
           source="{{.ROOT_DIR}}/.claude/skills/${skill}"
           target="{{.DEST}}/${skill}"
 
