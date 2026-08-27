@@ -44,12 +44,13 @@ only anchor `flow-slice` and `setup-flow-slice` need to find it; no HTML comment
 IDs are the only name each item needs (kebab-case is already a display name); do not add
 a separate `name` field. A status tag is only ever written for a `candidate` — an item
 with no tag is confirmed, so the common case costs zero words. State the semantic tools
-as a directive, not a label — "use ast-grep for code search and tracing here, not grep" —
-so any agent reading this file, not just one running `flow-slice`, reaches for it instead
-of defaulting to `grep`/`Read`. Confirmed tools only, most capable first (`ast-grep`
-before an LSP before `ripgrep`). Omit a role line, sentence, or whole subsection that has
-nothing to report — a monolith with no external systems has no `external:` line; a
-project with no generated code drops that sentence.
+as a directive, not a label — "reach for ast-grep first for code search and call tracing
+here" — so any agent reading this file, not just one running `flow-slice`, tries it
+before defaulting straight to `grep`/`Read`. Name it as the first reach, not the only one:
+falling back to whatever's available is fine. Confirmed tools only, `ast-grep` named
+first when present. Omit a role line, sentence, or whole subsection that has nothing to
+report — a monolith with no external systems has no `external:` line; a project with no
+generated code drops that sentence.
 
 Three subsections, weighted by how much each earns:
 
@@ -70,7 +71,8 @@ System → container → component, coarsest to finest. Managed by `setup-flow-s
 edit via the skill, not by hand.
 
 trace-dir: `.scratch/flow-slices`
-Use `ast-grep` for code search and call tracing in this repo, not grep. Fallback: `gopls`.
+Reach for `ast-grep` first for code search and call tracing in this repo; fall back to
+whatever's available (`gopls`, grep) when it can't answer.
 
 ### Systems
 - focus: `billing-platform`
