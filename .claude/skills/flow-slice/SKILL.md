@@ -11,9 +11,14 @@ crossing references one explicit relationship.
 
 ## Steps
 
-1. Read the `flow-slice:c4` block in the governing `AGENTS.md` or `CLAUDE.md`. If it is
+1. Read the `## C4 Map` section in the governing `AGENTS.md` or `CLAUDE.md`. If it is
    missing, stale, or still contains candidates that affect this trace, run
-   `setup-flow-slice` and obtain confirmation before tracing.
+   `setup-flow-slice` and obtain confirmation before tracing. Containers and components
+   list only one confirmed example each, and Boundaries lists only confirmed transports,
+   to pin the project's granularity rather than enumerate it — so a runtime, module, or
+   transport this trace touches is expected to be unlisted. That is not staleness: add it
+   and continue; only rerun `setup-flow-slice` once the trace is done, to fold the finds
+   back in.
 2. Find entry points across configured transports, contracts, and wiring roots. Record
    each candidate as file:line and name its path `<name> (<trigger>)`, where trigger is
    `grpc`, `graphql`, `nats-consumer`, `cron`, or `http`.

@@ -12,7 +12,7 @@ permanent Cytoscape viewer.
 
 1. Run `flow-slice` first when no current verified trace exists.
 2. Write the schema below to the configured `trace-dir`, reusing stable C4 IDs from the
-   project's `flow-slice:c4` block. Do not invent evidence.
+   project's `## C4 Map` section. Do not invent evidence.
 3. Run `scripts/open-viewer.sh <trace.toon>`. Fix every error and quality warning. Use
    `--ignore-warnings` only after manually proving a warning is a false positive.
 4. When browser control is available, confirm C2 → C3 → C4 drill-down, breadcrumbs,

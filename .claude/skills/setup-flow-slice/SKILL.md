@@ -18,63 +18,72 @@ configuration block in the project's existing agent instructions.
    and wiring roots over manual search. Prefer manifests, schemas, and generated headers over guesses.
 2. Assign lowercase kebab-case C4 IDs that remain stable when display names change.
    Mark every finding `confirmed`, `candidate`, or `unavailable`, and show the proposed
-   configuration before writing. Report unavailable tooling with a concrete
-   recommendation (e.g. `task install:ast-grep`); do not install it without asking.
+   configuration before writing. If no semantic tool is confirmed, offer to install one
+   before finishing setup, in this order: `ast-grep` first, then an LSP for the project's
+   language, then `ripgrep`. Name the concrete install command (e.g. `task
+   install:ast-grep`). Install only on explicit yes.
 3. Select the instruction file. Use the one of `AGENTS.md` or `CLAUDE.md` that already
    governs the traced code. Ask only when both independently govern the same scope, or
-   neither exists. Treat a symlink between them as one file.
+   neither exists. Treat a symlink between them as one file. Read the rest of that file
+   first: if it already names the same services, transports, or entry points elsewhere,
+   reuse those names as the C4 IDs and skip restating what it already says — the C4 Map
+   section adds only the classification (role, status, roots) that section lacks.
 4. Propose `.scratch/flow-slices` as `trace-dir` unless the project already has a local,
    ignored trace location. Confirm that the chosen path is ignored; include the narrow
    ignore rule when the user accepts the proposal.
-5. After confirmation, replace or append exactly one block delimited by
-   `<!-- flow-slice:c4:start -->` and `<!-- flow-slice:c4:end -->`. Preserve all content
-   outside the markers. Re-running this skill updates that block in place; do not create
-   a separate `.flow-slice.yml`.
+5. After confirmation, replace or append exactly the `## C4 Map` section — that heading
+   through the next heading of equal or shallower level, or end of file. Keep it inline
+   in the instruction file — one file stays the single source of truth; do not create a
+   separate `.flow-slice.yml`. Re-running this skill regenerates the whole section in
+   place.
 
-## Configuration block
+## C4 Map section
 
-Use YAML inside the markers and omit empty collections. Keep evidence as repository
-paths, optionally with a line number.
+Markdown, not YAML — it reads as documentation, not config, and its own heading is the
+only anchor `flow-slice` and `setup-flow-slice` need to find it; no HTML comment markers.
+IDs are the only name each item needs (kebab-case is already a display name); do not add
+a separate `name` field. A status tag is only ever written for a `candidate` — an item
+with no tag is confirmed, so the common case costs zero words. `semantic-tools` is a flat
+list, confirmed tools only, `ast-grep` first when present. Omit a role line, sentence, or
+whole subsection that has nothing to report — a monolith with no external systems has no
+`external:` line; a project with no generated code drops that sentence.
 
-```yaml
-version: 2
-systems:
-  - id: billing-platform
-    name: Billing Platform
-    role: focus
-    status: confirmed
-  - id: payment-provider
-    name: Payment Provider
-    role: external
-    status: confirmed
-trace-dir: .scratch/flow-slices
-containers:
-  - id: api
-    system: billing-platform
-    name: API
-    kind: application
-    status: confirmed
-    roots: [cmd/api, internal]
-components:
-  - id: api-transactions
-    container: api
-    name: Transactions
-    status: candidate
-    roots: [internal/transactions]
-transports:
-  - id: public-http
-    kind: http
-    contract: openapi.yaml
-    status: confirmed
-wiring-roots:
-  - path: cmd/api/main.go
-    status: confirmed
-generated-code:
-  - path: gen
-    status: confirmed
-semantic-tools:
-  - name: gopls
-    status: confirmed
+Three subsections, weighted by how much each earns:
+
+- **Systems** — few, each a real boundary: list every one, grouped by role.
+- **Boundaries** — transports, the wiring root, and generated-code paths, as two or three
+  plain sentences, not a bulleted inventory. Name what's confirmed and say more
+  transports may turn up — tracing, not this skill, is what completes that list.
+- **Containers & components** — these can be numerous; give one confirmed example of
+  each as a sentence, enough to pin the project's granularity (what counts as a
+  container, what counts as a component here), not a full inventory. `flow-slice` treats
+  an encountered-but-unlisted container or component as a stale map and reruns this
+  skill, which is when the rest get added.
+
+```markdown
+## C4 Map
+
+System → container → component, coarsest to finest. Managed by `setup-flow-slice` —
+edit via the skill, not by hand.
+
+trace-dir: `.scratch/flow-slices`
+semantic-tools: ast-grep, gopls
+
+### Systems
+- focus: `billing-platform`
+- internal: `auth-service`, `contract-service` (candidate)
+- external: `clerk`, `postgres`
+
+### Boundaries
+Transports confirmed so far: `public-http` (HTTP, `openapi.yaml`). More may exist —
+tracing will surface them. Wiring root: `cmd/api/main.go`. Generated code lives under
+`internal/gen`.
+
+### Containers & components
+Example container: `api` in `billing-platform` (application, roots: `cmd/api`). Example
+component: `api-transactions` in `api` (roots: `internal/transactions`). Use this
+granularity — one container per deployable, one component per module — for anything
+else you meet while tracing.
 ```
 
 Exactly one system has role `focus`; other known systems have role `internal` or
@@ -85,6 +94,6 @@ keep the relationship endpoint at system level. Use the same IDs in every v2 tra
 
 ## Completion criterion
 
-The user has confirmed the proposed map, one marker block exists in the selected agent
-file, the trace directory is locally ignored, and unavailable tooling is reported
-without installation.
+The user has confirmed the proposed map, one `## C4 Map` section exists in the selected
+agent file, the trace directory is locally ignored, and missing tooling was reported and
+offered — installed only on explicit yes.
