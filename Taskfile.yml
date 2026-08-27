@@ -43,3 +43,10 @@ tasks:
 
           ln -s "${source}" "${target}"
         done
+
+  install:ast-grep:
+    desc: Install ast-grep for advanced structural code search
+    cmds:
+      - brew install ast-grep
+    status:
+      - command -v ast-grep

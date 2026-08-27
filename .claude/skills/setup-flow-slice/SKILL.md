@@ -13,13 +13,13 @@ configuration block in the project's existing agent instructions.
 1. Inspect the repository without changing it. Find the focus software system; known
    internal and external software systems; application and data-store containers;
    components; transports and contracts; composition/wiring roots; generated-code
-   paths; available LSP or semantic tools; and the current ignore rules. Prefer
-   manifests, entrypoints, wiring, schemas, and generated-file headers over
-   directory-name guesses.
+   paths; available LSP or semantic tools (including `ast-grep`); and the current
+   ignore rules. Prefer using `ast-grep` or LSP over manual search to find entrypoints
+   and wiring roots. Prefer manifests, schemas, and generated headers over guesses.
 2. Assign lowercase kebab-case C4 IDs that remain stable when display names change.
    Mark every finding `confirmed`, `candidate`, or `unavailable`, and show the proposed
    configuration before writing. Report unavailable tooling with a concrete
-   recommendation; do not install it.
+   recommendation (e.g. `task install:ast-grep`); do not install it without asking.
 3. Select the instruction file. Use the one of `AGENTS.md` or `CLAUDE.md` that already
    governs the traced code. Ask only when both independently govern the same scope, or
    neither exists. Treat a symlink between them as one file.
