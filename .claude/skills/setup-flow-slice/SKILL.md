@@ -43,10 +43,13 @@ Markdown, not YAML — it reads as documentation, not config, and its own headin
 only anchor `flow-slice` and `setup-flow-slice` need to find it; no HTML comment markers.
 IDs are the only name each item needs (kebab-case is already a display name); do not add
 a separate `name` field. A status tag is only ever written for a `candidate` — an item
-with no tag is confirmed, so the common case costs zero words. `semantic-tools` is a flat
-list, confirmed tools only, `ast-grep` first when present. Omit a role line, sentence, or
-whole subsection that has nothing to report — a monolith with no external systems has no
-`external:` line; a project with no generated code drops that sentence.
+with no tag is confirmed, so the common case costs zero words. State the semantic tools
+as a directive, not a label — "use ast-grep for code search and tracing here, not grep" —
+so any agent reading this file, not just one running `flow-slice`, reaches for it instead
+of defaulting to `grep`/`Read`. Confirmed tools only, most capable first (`ast-grep`
+before an LSP before `ripgrep`). Omit a role line, sentence, or whole subsection that has
+nothing to report — a monolith with no external systems has no `external:` line; a
+project with no generated code drops that sentence.
 
 Three subsections, weighted by how much each earns:
 
@@ -67,7 +70,7 @@ System → container → component, coarsest to finest. Managed by `setup-flow-s
 edit via the skill, not by hand.
 
 trace-dir: `.scratch/flow-slices`
-semantic-tools: ast-grep, gopls
+Use `ast-grep` for code search and call tracing in this repo, not grep. Fallback: `gopls`.
 
 ### Systems
 - focus: `billing-platform`
