@@ -5,9 +5,9 @@ description: Use before planning, implementing, or reviewing a feature/change/to
 
 # Flow Slice
 
-A flow slice is the verified path a feature takes through one configured software
-system. Every code hop carries its evidence; every boundary crossing references one
-explicit C2 relationship.
+A flow slice is the verified path a feature takes through one configured focus software
+system and its dependencies. Every code hop carries its evidence; every boundary
+crossing references one explicit relationship.
 
 ## Steps
 
@@ -22,11 +22,12 @@ explicit C2 relationship.
    callback/async handoff as an ordinary caller-to-callee hop, then continue from its
    body. A path such as `CreateTransaction (callback)` loses its entrypoint and is
    invalid.
-4. Classify each in-system runtime as its configured C2 container and each internal
-   module as its configured C3 component. Record code calls only inside one container.
-   Represent every cross-container or external call once as a configured C2
-   relationship; attach its ID to the local client/publisher/database hop instead of
-   drawing a code hop into the other container.
+4. Classify each runtime as its configured C2 container and each module as its
+   configured C3 component. Give every code hop explicit caller and callee component
+   IDs. Record code calls only inside one container. Represent every cross-container or
+   cross-system call once as a relationship at the most precise confirmed endpoint;
+   attach its ID to the local client/publisher/database hop instead of drawing a code
+   hop into the other container.
 5. Write v2 TOON to the configured `trace-dir` using `flow-slice-viz`. Preserve every
    unresolved hop and the operation that confirmed every resolved hop.
 
@@ -37,7 +38,7 @@ explicit C2 relationship.
   and implementation call separately.
 - **Generated contract seam.** Use generated server/client code to cross an RPC or API
   seam when the schema has no semantic tooling. Read the source contract for shapes;
-  retain the HTTP operation, RPC signature, or subject on the C2 relationship.
+  retain the HTTP operation, RPC signature, or subject on the boundary relationship.
 - **Event seam.** Link publish to subscribe through the subject constant and wiring.
   Call hierarchy alone cannot establish this edge.
 - **Call graph.** Prefer available semantic operations such as `outgoingCalls`,
@@ -53,6 +54,6 @@ explicit C2 relationship.
 ## Completion criterion
 
 The v2 trace validates without ignored warnings. Every code path is reachable from its
-entrypoint through recorded callback/goroutine handoffs, every code hop stays inside its
-container and component, every C2 boundary uses a relationship ID, and every unresolved
-edge remains visible.
+entrypoint through recorded callback/goroutine handoffs, every code hop stays inside one
+container, every boundary uses a relationship ID, and every unresolved edge remains
+visible.

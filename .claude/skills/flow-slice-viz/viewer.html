@@ -7,6 +7,8 @@
 <title>flow-slice-viz</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2313191d'/><path d='M8 10h12m-4-4 5 4-5 4M24 22H12m4-4-5 4 5 4' fill='none' stroke='%2374d3ae' stroke-width='3'/></svg>">
 <script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+<script src="https://unpkg.com/elkjs@0.9.3/lib/elk.bundled.js"></script>
+<script src="https://unpkg.com/cytoscape-elk@2.3.0/dist/cytoscape-elk.js"></script>
 <style>
   :root { color-scheme: dark; --canvas:#0c1114; --panel:#13191d; --raised:#182126; --line:#29343a; --text:#e8eeeb; --muted:#86948f; --accent:#74d3ae; --danger:#f06a6a; }
   * { box-sizing:border-box; }
@@ -50,119 +52,158 @@
 <div id="cy"></div><div id="tooltip"></div><div id="legend"></div><div id="status" role="status" aria-live="polite"></div>
 <script>
 const SCHEMAS = {
-  software_system:['id','name'], containers:['id','name','kind'], external_systems:['id','name'],
+  systems:['id','name','role'], containers:['id','system','name','kind'],
   relationships:['id','from','to','transport','contract','confirmed','via','evidence'],
   components:['id','container','name'],
-  hops:['id','path','container','component','caller','callee','file','line','confirmed','via','outcome','relationship'],
+  hops:['id','path','from_component','to_component','caller','callee','file','line','confirmed','via','outcome','relationship'],
 };
 const TRIGGERS = new Set(['grpc','graphql','nats-consumer','cron','http','callback']);
-const COLORS = { http:'#63a6d9', grpc:'#63a6d9', event:'#bd8ae6', database:'#d9a45c', unknown:'#f06a6a' };
+const COLORS = {http:'#63a6d9',grpc:'#63a6d9',event:'#bd8ae6',database:'#d9a45c',unknown:'#f06a6a'};
 const PATH_COLORS = ['#d98c3d','#3dd9a0','#d93d8c','#8c3dd9','#d9d13d','#3da8d9'];
-const pathColors = new Map();
-let slice=null, cy=null, level='c2', containerId=null, componentId=null;
+const pathColors = new Map(), expandedSystems = new Set(), expandedContainers = new Set();
+let slice=null, model=null, cy=null, level='c2', containerId=null, componentId=null;
 const byId=(rows,id)=>rows.find(row=>row.id===id);
 const esc=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-const pathColor=path=>{ if(!pathColors.has(path)) pathColors.set(path,PATH_COLORS[pathColors.size%PATH_COLORS.length]); return pathColors.get(path); };
+const pathColor=path=>{if(!pathColors.has(path))pathColors.set(path,PATH_COLORS[pathColors.size%PATH_COLORS.length]);return pathColors.get(path);};
 
 function splitRow(row,line) {
   const cells=[]; let current='',quoted=false;
-  for(const char of row) { if(char==='"') quoted=!quoted; else if(char===','&&!quoted){cells.push(current);current='';} else current+=char; }
-  if(quoted) throw new Error(`Unmatched quote on line ${line}.`); cells.push(current); return cells;
+  for(const char of row){if(char==='"')quoted=!quoted;else if(char===','&&!quoted){cells.push(current);current='';}else current+=char;}
+  if(quoted)throw new Error(`Unmatched quote on line ${line}.`);cells.push(current);return cells;
 }
-function coerce(value) { return value==='true'?true:value==='false'?false:value; }
+function coerce(value){return value==='true'?true:value==='false'?false:value;}
 function parseToon(text) {
-  if(!text.trim()) throw new Error('The TOON file is empty.');
-  if(/^services\[|^edges\[/m.test(text)) throw new Error('V1 traces are unsupported. Run setup-flow-slice and retrace as v2.');
-  const data={},lines=text.replace(/\r\n/g,'\n').split('\n'); let i=0;
-  while(i<lines.length) {
-    const line=lines[i]; if(!line.trim()||/^\s*#/.test(line)){i++;continue;}
+  if(!text.trim())throw new Error('The TOON file is empty.');
+  if(/^services\[|^edges\[/m.test(text))throw new Error('V1 traces are unsupported. Run setup-flow-slice and retrace as v2.');
+  if(/^software_system\[|^external_systems\[/m.test(text))throw new Error('Early v2 traces are unsupported. Run setup-flow-slice and retrace.');
+  const data={},lines=text.replace(/\r\n/g,'\n').split('\n');let i=0;
+  while(i<lines.length){
+    const line=lines[i];if(!line.trim()||/^\s*#/.test(line)){i++;continue;}
     const header=line.match(/^(\w+)\[(\d+)\]\{([^}]*)\}:\s*$/);
-    if(header) {
-      const [,key,countText,fieldText]=header, fields=fieldText.split(',').map(value=>value.trim());
-      if(!SCHEMAS[key]) throw new Error(`Unknown table "${key}" on line ${i+1}.`);
-      if(data[key]) throw new Error(`Duplicate table "${key}" on line ${i+1}.`);
-      if(fields.join(',')!==SCHEMAS[key].join(',')) throw new Error(`Wrong columns for ${key} on line ${i+1}.`);
+    if(header){
+      const [,key,countText,fieldText]=header,fields=fieldText.split(',').map(value=>value.trim());
+      if(!SCHEMAS[key])throw new Error(`Unknown table "${key}" on line ${i+1}.`);
+      if(data[key])throw new Error(`Duplicate table "${key}" on line ${i+1}.`);
+      if(fields.join(',')!==SCHEMAS[key].join(','))throw new Error(`Wrong columns for ${key} on line ${i+1}.`);
       data[key]=[];
-      for(let row=0;row<Number(countText);row++) { i++; if(!lines[i]?.startsWith('  ')) throw new Error(`Missing ${key} row on line ${i+1}.`); const cells=splitRow(lines[i].trim(),i+1); if(cells.length!==fields.length||cells.some(cell=>cell==='')) throw new Error(`Invalid ${key} row on line ${i+1}.`); data[key].push(Object.fromEntries(fields.map((field,index)=>[field,coerce(cells[index])]))); }
-      i++; continue;
+      for(let row=0;row<Number(countText);row++){i++;if(!lines[i]?.startsWith('  '))throw new Error(`Missing ${key} row on line ${i+1}.`);const cells=splitRow(lines[i].trim(),i+1);if(cells.length!==fields.length||cells.some(cell=>cell===''))throw new Error(`Invalid ${key} row on line ${i+1}.`);data[key].push(Object.fromEntries(fields.map((field,index)=>[field,coerce(cells[index])])));}
+      i++;continue;
     }
-    const scalar=line.match(/^(version|topic):\s(.+)$/); if(!scalar) throw new Error(`Invalid top-level line ${i+1}.`);
-    if(data[scalar[1]]!==undefined) throw new Error(`Duplicate ${scalar[1]} on line ${i+1}.`); data[scalar[1]]=scalar[2]; i++;
+    const scalar=line.match(/^(version|topic):\s(.+)$/);if(!scalar)throw new Error(`Invalid top-level line ${i+1}.`);
+    if(data[scalar[1]]!==undefined)throw new Error(`Duplicate ${scalar[1]} on line ${i+1}.`);data[scalar[1]]=scalar[2];i++;
   }
-  validate(data); return data;
+  validate(data);return data;
 }
 function validate(data) {
-  if(data.version!=='2') throw new Error('Version must be 2. Run setup-flow-slice and retrace.');
-  if(!data.topic) throw new Error('Missing topic.');
-  Object.keys(SCHEMAS).forEach(key=>{if(!Array.isArray(data[key])) throw new Error(`Missing ${key} table.`);});
-  if(data.software_system.length!==1) throw new Error('software_system must contain exactly one row.');
-  const containers=new Map(data.containers.map(row=>[row.id,row])), externals=new Set(data.external_systems.map(row=>row.id));
-  const components=new Map(data.components.map(row=>[row.id,row])), relationships=new Map(data.relationships.map(row=>[row.id,row]));
-  const ids=[...data.software_system,...data.containers,...data.external_systems,...data.relationships,...data.components,...data.hops].map(row=>row.id);
-  if(new Set(ids).size!==ids.length) throw new Error('IDs must be globally unique.');
-  data.relationships.forEach(row=>{if(!(containers.has(row.from)||externals.has(row.from))||!(containers.has(row.to)||externals.has(row.to))) throw new Error(`Relationship ${row.id} has an unknown endpoint.`);if(!containers.has(row.from)&&!containers.has(row.to))throw new Error(`Relationship ${row.id} must touch a container.`);});
-  data.components.forEach(row=>{if(containers.get(row.container)?.kind!=='application') throw new Error(`Component ${row.id} has an invalid parent.`);});
-  data.hops.forEach(row=>{const match=row.path.match(/^.+ \(([^)]+)\)$/); if(!match||!TRIGGERS.has(match[1])) throw new Error(`Hop ${row.id} has an invalid entrypoint suffix.`); if(components.get(row.component)?.container!==row.container) throw new Error(`Hop ${row.id} crosses containers.`); if(row.relationship!=='-'&&!relationships.has(row.relationship)) throw new Error(`Hop ${row.id} references an unknown relationship.`);});
+  if(data.version!=='2')throw new Error('Version must be 2. Run setup-flow-slice and retrace.');
+  if(!data.topic)throw new Error('Missing topic.');
+  Object.keys(SCHEMAS).forEach(key=>{if(!Array.isArray(data[key]))throw new Error(`Missing ${key} table.`);});
+  if(data.systems.filter(row=>row.role==='focus').length!==1)throw new Error('Systems must contain exactly one focus row.');
+  const systems=new Map(data.systems.map(row=>[row.id,row])),containers=new Map(data.containers.map(row=>[row.id,row])),components=new Map(data.components.map(row=>[row.id,row])),relationships=new Map(data.relationships.map(row=>[row.id,row]));
+  const ids=[...data.systems,...data.containers,...data.relationships,...data.components,...data.hops].map(row=>row.id);
+  if(new Set(ids).size!==ids.length)throw new Error('IDs must be globally unique.');
+  data.systems.forEach(row=>{if(!['focus','internal','external'].includes(row.role))throw new Error(`System ${row.id} has an invalid role.`);});
+  data.containers.forEach(row=>{if(!systems.has(row.system)||!['application','data-store'].includes(row.kind))throw new Error(`Container ${row.id} has an invalid parent or kind.`);});
+  data.components.forEach(row=>{if(containers.get(row.container)?.kind!=='application')throw new Error(`Component ${row.id} has an invalid parent.`);});
+  const endpointContainer=id=>components.get(id)?.container||(containers.has(id)?id:null),endpointSystem=id=>systems.has(id)?id:containers.get(endpointContainer(id))?.system;
+  const endpoints=new Set([...systems.keys(),...containers.keys(),...components.keys()]);
+  data.relationships.forEach(row=>{const a=endpointContainer(row.from),b=endpointContainer(row.to);if(!endpoints.has(row.from)||!endpoints.has(row.to))throw new Error(`Relationship ${row.id} has an unknown endpoint.`);if(row.from===row.to||(a&&a===b))throw new Error(`Relationship ${row.id} stays inside one container.`);if((!a||!b)&&endpointSystem(row.from)===endpointSystem(row.to))throw new Error(`Relationship ${row.id} stays inside one system hierarchy.`);});
+  data.hops.forEach(row=>{const match=row.path.match(/^.+ \(([^)]+)\)$/),a=components.get(row.from_component),b=components.get(row.to_component);if(!match||!TRIGGERS.has(match[1]))throw new Error(`Hop ${row.id} has an invalid entrypoint suffix.`);if(!a||!b)throw new Error(`Hop ${row.id} has an unknown component.`);if(a.container!==b.container)throw new Error(`Hop ${row.id} crosses containers.`);if(row.relationship!=='-'&&!relationships.has(row.relationship))throw new Error(`Hop ${row.id} references an unknown relationship.`);});
 }
-function encode(text) { const bytes=new TextEncoder().encode(text); let binary=''; bytes.forEach(byte=>binary+=String.fromCharCode(byte)); return btoa(binary); }
-function decode(text) { const binary=atob(text); return new TextDecoder().decode(Uint8Array.from(binary,char=>char.charCodeAt(0))); }
-function load(text) {
-  try { slice=parseToon(text); } catch(error) { showError(error.message); return; }
-  level='c2'; containerId=null; componentId=null;
-  share.href=`https://bad33ndj3.github.io/flow-slice-skill/#b64=${encode(text)}`; share.removeAttribute('aria-disabled'); render();
+function buildModel(){
+  const systems=new Map(slice.systems.map(row=>[row.id,row])),containers=new Map(slice.containers.map(row=>[row.id,row])),components=new Map(slice.components.map(row=>[row.id,row]));
+  const containerOf=id=>components.get(id)?.container||(containers.has(id)?id:null);
+  const systemOf=id=>systems.has(id)?id:containers.get(containerOf(id))?.system;
+  return {systems,containers,components,containerOf,systemOf,focus:slice.systems.find(row=>row.role==='focus')};
 }
-function showError(message) { if(cy){cy.destroy();cy=null;} slice=null; share.removeAttribute('href'); share.setAttribute('aria-disabled','true'); empty.classList.add('error'); empty.replaceChildren(Object.assign(document.createElement('strong'),{textContent:'Could not open flow slice'}),Object.assign(document.createElement('span'),{textContent:message})); empty.style.display='flex'; }
+function encode(text){const bytes=new TextEncoder().encode(text);let binary='';bytes.forEach(byte=>binary+=String.fromCharCode(byte));return btoa(binary);}
+function decode(text){const binary=atob(text);return new TextDecoder().decode(Uint8Array.from(binary,char=>char.charCodeAt(0)));}
+function load(text){
+  try{slice=parseToon(text);model=buildModel();}catch(error){showError(error.message);return;}
+  level='c2';containerId=null;componentId=null;expandedSystems.clear();expandedContainers.clear();pathColors.clear();
+  share.href=`https://bad33ndj3.github.io/flow-slice-skill/#b64=${encode(text)}`;share.removeAttribute('aria-disabled');render();
+}
+function showError(message){if(cy){cy.destroy();cy=null;}slice=null;share.removeAttribute('href');share.setAttribute('aria-disabled','true');empty.classList.add('error');empty.replaceChildren(Object.assign(document.createElement('strong'),{textContent:'Could not open flow slice'}),Object.assign(document.createElement('span'),{textContent:message}));empty.style.display='flex';}
 
 file.addEventListener('change',event=>{const selected=event.target.files[0];if(!selected)return;const reader=new FileReader();reader.onload=()=>load(reader.result);reader.onerror=()=>showError(`Could not read ${selected.name}.`);reader.readAsText(selected);});
-const hash=location.hash.slice(1); if(hash.startsWith('b64=')){try{load(decode(hash.slice(4)));}catch(error){showError(`Could not decode URL data: ${error.message}`);}}
+const hash=location.hash.slice(1);if(hash.startsWith('b64=')){try{load(decode(hash.slice(4)));}catch(error){showError(`Could not decode URL data: ${error.message}`);}}
 back.addEventListener('click',()=>{if(level==='c4'){level='c3';componentId=null;}else if(level==='c3'){level='c2';containerId=null;}render();});
 
-function c2Elements() {
-  const nodes=[...slice.containers.map(row=>({data:{id:row.id,label:row.name,nodeType:'container',kind:row.kind,drill:row.kind==='application'}})),...slice.external_systems.map(row=>({data:{id:row.id,label:row.name,nodeType:'external-system',kind:'external-system',drill:false}}))];
-  const edges=slice.relationships.map(row=>({data:{...row,source:row.from,target:row.to,label:row.transport,kind:row.transport}})); return [...nodes,...edges];
+function node(row,extra={}){return {data:{id:row.id,label:row.name,...extra}};}
+function aggregate(items,project,kind,labelValue,prefix){
+  const grouped=new Map();
+  items.forEach(item=>{const source=project(item.from??item.from_component),target=project(item.to??item.to_component);if(!source||!target||source===target)return;const edgeKind=kind(item),key=`${source}|${target}|${edgeKind}`;if(!grouped.has(key))grouped.set(key,{source,target,kind:edgeKind,confirmed:true,labels:new Set(),contracts:new Set(),paths:new Set(),evidence:new Set(),via:new Set(),relationships:new Set(),outcomes:new Set(),count:0});const edge=grouped.get(key);edge.confirmed&&=item.confirmed;edge.count++;const label=labelValue(item);if(label&&label!=='-')edge.labels.add(label);if(item.contract&&item.contract!=='-')edge.contracts.add(item.contract);if(item.path)edge.paths.add(item.path);edge.evidence.add(item.evidence||`${item.file}:${item.line}`);edge.via.add(item.via);const relationship=item.from!==undefined?item.id:item.relationship;if(relationship&&relationship!=='-')edge.relationships.add(relationship);if(item.outcome&&item.outcome!=='-')edge.outcomes.add(item.outcome);});
+  return [...grouped.entries()].map(([key,edge])=>{const labels=[...edge.labels],first=labels[0]||edge.kind;return {data:{id:`${prefix}:${key}`,source:edge.source,target:edge.target,kind:edge.kind,label:`${first}${edge.count>1?` +${edge.count-1}`:''}`,confirmed:edge.confirmed,count:edge.count,contract:[...edge.contracts].join('; ')||'-',path:[...edge.paths].join('; ')||'-',evidence:[...edge.evidence].join('; '),via:[...edge.via].join('; '),relationship:[...edge.relationships].join('; ')||'-',outcome:[...edge.outcomes].join('; ')||'-'}};});
 }
-function c3Elements() { return slice.components.filter(row=>row.container===containerId).map(row=>({data:{id:row.id,label:row.name,nodeType:'component',kind:'component',drill:true}})); }
-function c4Elements() {
-  const hops=slice.hops.filter(row=>row.component===componentId), symbols=new Map();
-  hops.forEach(hop=>[hop.caller,hop.callee].forEach(symbol=>{if(!symbols.has(symbol))symbols.set(symbol,{data:{id:`symbol:${symbol}`,label:symbol.split('.').pop(),symbol,nodeType:'code',kind:'code'}});}));
-  const edges=hops.map(hop=>({data:{...hop,source:`symbol:${hop.caller}`,target:`symbol:${hop.callee}`,label:hop.outcome==='-'?'':hop.outcome,evidence:`${hop.file}:${hop.line}`,kind:'hop',pathColor:pathColor(hop.path)}}));
+function c2Elements(){
+  const nodes=[node(model.focus,{nodeType:'software system',kind:'focus-system',role:'focus'})];
+  slice.containers.filter(row=>row.system===model.focus.id).forEach(row=>nodes.push(node(row,{parent:model.focus.id,nodeType:'container',kind:row.kind,action:row.kind==='application'?'drill':null})));
+  slice.systems.filter(row=>row.id!==model.focus.id).forEach(row=>nodes.push(node(row,{nodeType:'software system',kind:'supporting-system',role:row.role,outside:true})));
+  const project=id=>{const system=model.systemOf(id);if(system!==model.focus.id)return system;return model.containerOf(id)||model.focus.id;};
+  return [...nodes,...aggregate(slice.relationships,project,row=>row.transport,row=>row.contract==='-'?row.transport:row.contract,'c2')];
+}
+function inContainer(endpoint,id){return endpoint===id||model.components.get(endpoint)?.container===id;}
+function c3Elements(){
+  const relationships=slice.relationships.filter(row=>inContainer(row.from,containerId)||inContainer(row.to,containerId)||row.from===model.focus.id||row.to===model.focus.id);
+  const nodes=new Map(),focusContainer=model.containers.get(containerId);
+  nodes.set(containerId,node(focusContainer,{nodeType:'container scope',kind:'focus-scope'}));
+  slice.components.filter(row=>row.container===containerId).forEach(row=>nodes.set(row.id,node(row,{parent:containerId,nodeType:'component',kind:'component',action:'drill'})));
+  const participatingComponents=id=>new Set(relationships.flatMap(row=>[row.from,row.to]).filter(endpoint=>model.components.get(endpoint)?.container===id));
+  const participatingContainers=id=>new Set(relationships.flatMap(row=>[row.from,row.to]).map(endpoint=>model.containerOf(endpoint)).filter(container=>container&&model.containers.get(container)?.system===id));
+  const addContainer=(id,parent=null)=>{const row=model.containers.get(id),participants=participatingComponents(id);nodes.set(id,node(row,{parent,nodeType:'outside container',kind:row.kind,outside:true,action:participants.size?'toggle-container':null,expanded:expandedContainers.has(id)}));if(expandedContainers.has(id))participants.forEach(component=>{const child=model.components.get(component);nodes.set(component,node(child,{parent:id,nodeType:'outside component',kind:'component',outside:true}));});};
+  const addEndpoint=id=>{const systemId=model.systemOf(id),remoteContainer=model.containerOf(id);if(systemId===model.focus.id){if(remoteContainer&&remoteContainer!==containerId)addContainer(remoteContainer);return;}const system=model.systems.get(systemId),participants=participatingContainers(systemId);nodes.set(systemId,node(system,{nodeType:'outside software system',kind:'supporting-system',role:system.role,outside:true,action:participants.size?'toggle-system':null,expanded:expandedSystems.has(systemId)}));if(expandedSystems.has(systemId))participants.forEach(container=>addContainer(container,systemId));};
+  relationships.forEach(row=>{addEndpoint(row.from);addEndpoint(row.to);});
+  const project=id=>{const systemId=model.systemOf(id),remoteContainer=model.containerOf(id);if(systemId===model.focus.id){if(!remoteContainer||remoteContainer===containerId)return model.components.has(id)?id:containerId;return model.components.has(id)&&expandedContainers.has(remoteContainer)?id:remoteContainer;}if(!expandedSystems.has(systemId)||!remoteContainer)return systemId;if(model.components.has(id)&&expandedContainers.has(remoteContainer))return id;return remoteContainer;};
+  const internal=slice.hops.filter(row=>model.components.get(row.from_component)?.container===containerId&&model.components.get(row.to_component)?.container===containerId&&row.from_component!==row.to_component);
+  return [...nodes.values(),...aggregate(internal,id=>id,()=> 'c3-edge',row=>row.callee,'c3-hop'),...aggregate(relationships,project,row=>row.transport,row=>row.contract==='-'?row.transport:row.contract,'c3-rel')];
+}
+function c4Elements(){
+  const hops=slice.hops.filter(row=>row.from_component===componentId||row.to_component===componentId),symbols=new Map();
+  const symbolId=(component,symbol)=>`symbol:${component}:${symbol}`;
+  hops.forEach(hop=>[[hop.from_component,hop.caller],[hop.to_component,hop.callee]].forEach(([component,symbol])=>{const id=symbolId(component,symbol);if(!symbols.has(id))symbols.set(id,{data:{id,label:symbol.split('.').pop(),symbol,nodeType:component===componentId?'code':'outside code',kind:'code',outside:component!==componentId}});}));
+  const edges=hops.map(hop=>({data:{...hop,source:symbolId(hop.from_component,hop.caller),target:symbolId(hop.to_component,hop.callee),label:hop.outcome==='-'?'':hop.outcome,evidence:`${hop.file}:${hop.line}`,kind:'hop',pathColor:pathColor(hop.path),count:1}}));
   return [...symbols.values(),...edges];
 }
-function render() {
-  if(!slice||typeof cytoscape!=='function'){if(slice)showError('The graph library could not be loaded.');return;}
-  empty.classList.remove('error'); empty.style.display='none'; tooltip.style.display='none'; back.disabled=level==='c2';
-  const system=slice.software_system[0].name, container=containerId&&byId(slice.containers,containerId), component=componentId&&byId(slice.components,componentId);
-  crumbs.innerHTML=[`<strong>${esc(system)}</strong>`,level==='c2'?'Containers (C2)':esc(container.name),level==='c3'?'Components (C3)':null,level==='c4'?esc(component.name):null,level==='c4'?'Code (C4)':null].filter(Boolean).join(' / ')+` <span id="topic">— ${esc(slice.topic)}</span>`;
-  if(cy)cy.destroy(); cy=cytoscape({container:document.getElementById('cy'),elements:level==='c2'?c2Elements():level==='c3'?c3Elements():c4Elements(),style:styles(),layout:{name:'breadthfirst',directed:true,spacingFactor:1.08,padding:48}}); renderLegend();
-  cy.on('tap','node',event=>{const data=event.target.data();if(!data.drill)return;if(level==='c2'){containerId=data.id;level='c3';}else if(level==='c3'){componentId=data.id;level='c4';}render();});
-  cy.on('mouseover','node, edge',showTooltip); cy.on('mousemove',event=>positionTooltip(event.originalEvent)); cy.on('mouseout','node, edge',()=>{tooltip.style.display='none';document.getElementById('cy').style.cursor='';});
-  cy.on('mouseover','edge',event=>{if(event.target.data('confirmed')!==false)document.getElementById('cy').style.cursor='copy';}); cy.on('tap','edge',event=>copyEvidence(event.target.data()));
+function layoutOptions(){return {name:'elk',fit:true,padding:48,nodeDimensionsIncludeLabels:true,elk:{algorithm:'layered','elk.direction':'RIGHT','elk.hierarchyHandling':'INCLUDE_CHILDREN','elk.spacing.nodeNode':'44','elk.layered.spacing.nodeNodeBetweenLayers':'82'}};}
+function render(){
+  if(!slice||typeof cytoscape!=='function'||typeof ELK!=='function'){if(slice)showError('The graph libraries could not be loaded.');return;}
+  empty.classList.remove('error');empty.style.display='none';tooltip.style.display='none';back.disabled=level==='c2';
+  const container=containerId&&model.containers.get(containerId),component=componentId&&model.components.get(componentId);
+  crumbs.innerHTML=[`<strong>${esc(model.focus.name)}</strong>`,level==='c2'?'Containers (C2)':esc(container.name),level==='c3'?'Components (C3)':null,level==='c4'?esc(component.name):null,level==='c4'?'Code (C4)':null].filter(Boolean).join(' / ')+` <span id="topic">— ${esc(slice.topic)}</span>`;
+  if(cy)cy.destroy();cy=cytoscape({container:document.getElementById('cy'),elements:level==='c2'?c2Elements():level==='c3'?c3Elements():c4Elements(),style:styles(),layout:layoutOptions()});renderLegend();
+  cy.on('tap','node',event=>{const data=event.target.data();if(data.action==='drill'){if(level==='c2'){containerId=data.id;level='c3';}else if(level==='c3'){componentId=data.id;level='c4';}}else if(data.action==='toggle-system'){expandedSystems.has(data.id)?expandedSystems.delete(data.id):expandedSystems.add(data.id);}else if(data.action==='toggle-container'){expandedContainers.has(data.id)?expandedContainers.delete(data.id):expandedContainers.add(data.id);}else return;render();});
+  cy.on('mouseover','node, edge',showTooltip);cy.on('mousemove',event=>positionTooltip(event.originalEvent));cy.on('mouseout','node, edge',()=>{tooltip.style.display='none';document.getElementById('cy').style.cursor='';});
+  cy.on('mouseover','node',event=>{if(event.target.data('action'))document.getElementById('cy').style.cursor='pointer';});cy.on('mouseover','edge',event=>{if(event.target.data('confirmed')!==false)document.getElementById('cy').style.cursor='copy';});cy.on('tap','edge',event=>copyEvidence(event.target.data()));
 }
-function renderLegend() {
-  if(level==='c2') { const kinds=[...new Set(slice.relationships.map(row=>row.transport))]; legend.innerHTML=`<div class="title">C2 relationships</div>${kinds.map(kind=>`<div class="row"><span class="swatch${kind==='event'?' dashed':''}" style="color:${COLORS[kind]};background:${COLORS[kind]}"></span>${esc(kind)}</div>`).join('')}`; legend.style.display=kinds.length?'block':'none'; return; }
-  if(level==='c3') { legend.innerHTML='<div class="title">Components (C3)</div><div class="row">Select a component to inspect its code.</div>'; legend.style.display='block'; return; }
-  const paths=[...new Set(slice.hops.filter(row=>row.component===componentId).map(row=>row.path))]; legend.innerHTML=`<div class="title">Code paths (C4)</div>${paths.map(path=>`<div class="row"><span class="swatch" style="background:${pathColor(path)}"></span>${esc(path)}</div>`).join('')}`; legend.style.display=paths.length?'block':'none';
+function renderLegend(){
+  if(level==='c2'){const kinds=[...new Set(slice.relationships.map(row=>row.transport))];legend.innerHTML=`<div class="title">Containers (C2)</div>${kinds.map(kind=>`<div class="row"><span class="swatch${kind==='event'?' dashed':''}" style="color:${COLORS[kind]};background:${COLORS[kind]}"></span>${esc(kind)}</div>`).join('')}`;legend.style.display='block';return;}
+  if(level==='c3'){legend.innerHTML='<div class="title">Components (C3)</div><div class="row"><span class="swatch" style="background:#6799ad"></span>component call</div><div class="row"><span class="swatch dashed" style="color:#9d72b5"></span>outside current scope; click to expand</div>';legend.style.display='block';return;}
+  const paths=[...new Set(slice.hops.filter(row=>row.from_component===componentId||row.to_component===componentId).map(row=>row.path))];legend.innerHTML=`<div class="title">Code paths (C4)</div>${paths.map(path=>`<div class="row"><span class="swatch" style="background:${pathColor(path)}"></span>${esc(path)}</div>`).join('')}`;legend.style.display=paths.length?'block':'none';
 }
-function styles() { return [
-  {selector:'node',style:{'background-color':'#18252a','label':'data(label)','color':'#e8eeeb','font-family':'Avenir Next, Segoe UI, sans-serif','font-size':13,'font-weight':600,'text-valign':'center','text-halign':'center','shape':'round-rectangle','width':node=>Math.max(110,Math.min(230,node.data('label').length*7.5+32)),'height':42,'padding':10,'border-width':1,'border-color':'#48636a'}},
+function styles(){return [
+  {selector:'node',style:{'background-color':'#18252a','label':'data(label)','color':'#e8eeeb','font-family':'Avenir Next, Segoe UI, sans-serif','font-size':13,'font-weight':600,'text-valign':'center','text-halign':'center','shape':'round-rectangle','width':node=>Math.max(110,Math.min(230,node.data('label').length*7.5+32)),'height':42,'padding':16,'border-width':1,'border-color':'#48636a'}},
+  {selector:':parent',style:{'background-opacity':.12,'text-valign':'top','text-halign':'center','padding':28,'border-width':2}},
+  {selector:'node[kind="focus-system"],node[kind="focus-scope"]',style:{'background-color':'#1b302d','border-color':'#5c9f8a'}},
   {selector:'node[kind="application"]',style:{'background-color':'#1b302d','border-color':'#5c9f8a','border-width':2}},
   {selector:'node[kind="data-store"]',style:{'shape':'barrel','background-color':'#30291b','border-color':'#b58b52'}},
-  {selector:'node[kind="external-system"]',style:{'shape':'rectangle','background-color':'#2a2230','border-color':'#9d72b5','border-style':'dashed'}},
+  {selector:'node[kind="supporting-system"]',style:{'shape':'rectangle','background-color':'#2a2230','border-color':'#9d72b5'}},
   {selector:'node[kind="component"]',style:{'background-color':'#1c2d35','border-color':'#6799ad'}},
-  {selector:'edge',style:{'width':2,'line-color':'#526068','target-arrow-color':'#526068','target-arrow-shape':'triangle','curve-style':'bezier','label':'data(label)','font-size':11,'font-weight':600,'color':'#b8c4bf','text-background-color':'#0c1114','text-background-opacity':.9,'text-background-padding':4}},
+  {selector:'node[outside]',style:{'opacity':.72,'border-style':'dashed'}},
+  {selector:'edge',style:{'width':2,'line-color':'#526068','target-arrow-color':'#526068','target-arrow-shape':'triangle','curve-style':'taxi','taxi-direction':'rightward','taxi-turn':28,'label':'data(label)','font-size':11,'font-weight':600,'color':'#b8c4bf','text-background-color':'#0c1114','text-background-opacity':.9,'text-background-padding':4}},
   ...Object.entries(COLORS).map(([kind,color])=>({selector:`edge[kind="${kind}"]`,style:{'line-color':color,'target-arrow-color':color,'line-style':kind==='event'?'dashed':'solid'}})),
   {selector:'edge[kind="hop"]',style:{'line-color':'data(pathColor)','target-arrow-color':'data(pathColor)'}},
+  {selector:'edge[kind="c3-edge"]',style:{'line-color':'#6799ad','target-arrow-color':'#6799ad'}},
   {selector:'edge[!confirmed]',style:{'line-style':'dashed','line-color':'#f06a6a','target-arrow-color':'#f06a6a'}},
-]; }
-function showTooltip(event) {
-  const data=event.target.data(); let rows=[];
-  if(event.target.isNode()) rows=[[data.nodeType.replace('-', ' '),data.symbol||data.label],[data.drill?'click':'',data.drill?'drill down':'']];
-  else rows=[['via',data.confirmed===false?'<span class="unresolved">unresolved</span>':esc(data.via)],['evidence',esc(data.evidence||'-')],['contract',esc(data.contract||'-')],['path',esc(data.path||'-')],['outcome',esc(data.outcome||'-')],['relationship',esc(data.relationship||data.id||'-')],['click',data.confirmed===false?'':'copy evidence']];
-  tooltip.innerHTML=rows.filter(row=>row[0]&&row[1]&&row[1]!=='-').map(row=>`<div class="row"><span class="label">${esc(row[0])}</span>${row[1]}</div>`).join(''); tooltip.style.display='block';
+];}
+function showTooltip(event){
+  const data=event.target.data();let rows=[];
+  if(event.target.isNode()){const action=data.action==='drill'?'drill down':data.action?.startsWith('toggle')?(data.expanded?'collapse':'expand'):'';rows=[[data.nodeType,data.symbol||data.label],[data.outside?'scope':'',data.outside?'outside current scope':''],[action?'click':'',action]];}
+  else rows=[['count',data.count||1],['via',data.confirmed===false?'<span class="unresolved">unresolved</span>':esc(data.via)],['evidence',esc(data.evidence||'-')],['contract',esc(data.contract||'-')],['path',esc(data.path||'-')],['outcome',esc(data.outcome||'-')],['relationship',esc(data.relationship||data.id||'-')],['click',data.confirmed===false?'':'copy evidence']];
+  tooltip.innerHTML=rows.filter(row=>row[0]&&row[1]&&row[1]!=='-').map(row=>`<div class="row"><span class="label">${esc(row[0])}</span>${row[1]}</div>`).join('');tooltip.style.display='block';
 }
-function positionTooltip(event) { if(!event)return; tooltip.style.left=`${event.clientX+14}px`;tooltip.style.top=`${event.clientY+14}px`; }
-async function copyEvidence(data) { if(data.confirmed===false||!data.evidence)return; try{await navigator.clipboard.writeText(data.evidence);showStatus('Evidence copied');}catch{showStatus('Could not copy evidence');} }
-function showStatus(message) { status.textContent=message;status.style.display='block';clearTimeout(showStatus.timer);showStatus.timer=setTimeout(()=>status.style.display='none',1600); }
+function positionTooltip(event){if(!event)return;tooltip.style.left=`${event.clientX+14}px`;tooltip.style.top=`${event.clientY+14}px`;}
+async function copyEvidence(data){if(data.confirmed===false||!data.evidence)return;try{await navigator.clipboard.writeText(data.evidence);showStatus('Evidence copied');}catch{showStatus('Could not copy evidence');}}
+function showStatus(message){status.textContent=message;status.style.display='block';clearTimeout(showStatus.timer);showStatus.timer=setTimeout(()=>status.style.display='none',1600);}
 </script>
 </body>
 </html>

@@ -10,11 +10,12 @@ configuration block in the project's existing agent instructions.
 
 ## Steps
 
-1. Inspect the repository without changing it. Find the software system boundary;
-   application and data-store containers; components; external systems; transports and
-   contracts; composition/wiring roots; generated-code paths; available LSP or semantic
-   tools; and the current ignore rules. Prefer manifests, entrypoints, wiring, schemas,
-   and generated-file headers over directory-name guesses.
+1. Inspect the repository without changing it. Find the focus software system; known
+   internal and external software systems; application and data-store containers;
+   components; transports and contracts; composition/wiring roots; generated-code
+   paths; available LSP or semantic tools; and the current ignore rules. Prefer
+   manifests, entrypoints, wiring, schemas, and generated-file headers over
+   directory-name guesses.
 2. Assign lowercase kebab-case C4 IDs that remain stable when display names change.
    Mark every finding `confirmed`, `candidate`, or `unavailable`, and show the proposed
    configuration before writing. Report unavailable tooling with a concrete
@@ -37,13 +38,19 @@ paths, optionally with a line number.
 
 ```yaml
 version: 2
-software-system:
-  id: billing-platform
-  name: Billing Platform
-  status: confirmed
+systems:
+  - id: billing-platform
+    name: Billing Platform
+    role: focus
+    status: confirmed
+  - id: payment-provider
+    name: Payment Provider
+    role: external
+    status: confirmed
 trace-dir: .scratch/flow-slices
 containers:
   - id: api
+    system: billing-platform
     name: API
     kind: application
     status: confirmed
@@ -54,10 +61,6 @@ components:
     name: Transactions
     status: candidate
     roots: [internal/transactions]
-external-systems:
-  - id: payment-provider
-    name: Payment Provider
-    status: confirmed
 transports:
   - id: public-http
     kind: http
@@ -74,9 +77,11 @@ semantic-tools:
     status: confirmed
 ```
 
-Allowed container kinds are `application` and `data-store`. A component belongs to one
-application container. External systems sit outside the configured software system.
-Use the same IDs in every v2 trace.
+Exactly one system has role `focus`; other known systems have role `internal` or
+`external`. Every container belongs to one system. Allowed container kinds are
+`application` and `data-store`; a component belongs to one application container.
+Record remote containers and components only when evidence confirms them. Otherwise
+keep the relationship endpoint at system level. Use the same IDs in every v2 trace.
 
 ## Completion criterion
 
